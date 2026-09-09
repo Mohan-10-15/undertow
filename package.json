@@ -1,0 +1,16 @@
+{
+  "name": "undertow",
+  "version": "1.0.0",
+  "description": "Client-side phishing URL and email signal analyzer",
+  "main": "index.html",
+  "scripts": {
+    "test": "node test.js && node functional-test.js && node storage-test.js && node external-check-test.js && node localstorage-fallback-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "csv-parse": "^7.0.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "name": "undertow-extension",
+  "version": "1.0.0",
+  "description": "Browser extension popup for Undertow — checks the active tab's URL",
+  "scripts": {
+    "test": "node popup-test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  },
+  "license": "MIT"
+}
