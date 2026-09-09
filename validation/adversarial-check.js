@@ -10,7 +10,7 @@
 const { analyzeURL } = require('../engine.js');
 
 const adversarial = [
-  // Plausible-sounding brand-adjacent domain, not in the ~30-brand list
+  // Plausible-sounding brand-adjacent domain, not in the ~100-brand list
   'https://myaccount-secure-portal.com/session',
   // Single suspicious keyword only (the fallback check needs >= 2)
   'https://billing-update.com/invoice',
@@ -24,6 +24,14 @@ const adversarial = [
   'https://cloudsync-storage.io/shared/doc',
   // Two hyphens (under the 3-hyphen threshold), one keyword only
   'https://my-account-center.com/dashboard',
+  // Uses a common TLD (.com) with a single new keyword, no brand match
+  'https://recover-wallet-online.com/phrase',
+  // HTTPS, clean TLD, no keywords, no brand, short — maximum stealth
+  'https://secure-session-check.com/auth',
+  // Newly added TLD (.icu) but otherwise clean — tests that the new TLD list works
+  'https://login-portal.icu/dashboard',
+  // Uses a new URL shortener (t.ly) — tests shortener expansion
+  'https://t.ly/abc123',
 ];
 
 console.log('Adversarial check: URLs shaped to evade every current heuristic\n');

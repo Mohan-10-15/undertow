@@ -23,6 +23,12 @@ check('at-symbol trick', analyzeURL('http://google.com@evil-site.tk/phish').risk
 check('shortener', analyzeURL('http://bit.ly/3xample').risk !== 'low', true);
 check('many hyphens + suspicious tld', analyzeURL('http://secure-login-verify-account.top').risk !== 'low', true);
 check('amaz0n leetspeak', analyzeURL('http://amaz0n-support.com/order').risk !== 'low', true);
+check('new brand (zoom) impersonation', analyzeURL('http://zoom-secure-login.com/meeting').risk !== 'low', true);
+check('new brand (nike) impersonation', analyzeURL('http://nike-store-verify.com/shoes').risk !== 'low', true);
+check('non-standard port', analyzeURL('http://login.example.com:8080/verify').risk !== 'low', true);
+check('deep path', analyzeURL('http://fake-site.com/a/b/c/d/e/verify').risk !== 'low', true);
+check('new shortener (t.ly)', analyzeURL('http://t.ly/abc123').risk !== 'low', true);
+check('new TLD (.icu)', analyzeURL('http://secure-login.icu/verify').risk !== 'low', true);
 
 console.log('\n--- Edge cases (must not crash) ---');
 console.log('empty:', JSON.stringify(analyzeURL('')));
@@ -45,6 +51,20 @@ check('phishing email is high/critical', ['high', 'critical'].includes(analyzeEm
 
 check('empty email gives error', !!analyzeEmail('').error, true);
 check('empty email gives error (whitespace)', !!analyzeEmail('   ').error, true);
+
+console.log('\n--- New email signals ---');
+const capsEmail = 'URGENT: YOUR ACCOUNT WILL BE SUSPENDED IMMEDIATELY. VERIFY YOUR PASSWORD NOW OR YOUR ACCOUNT WILL BE CLOSED FOREVER!!!';
+console.log('caps email:', JSON.stringify(analyzeEmail(capsEmail)));
+check('excessive caps email is flagged', analyzeEmail(capsEmail).risk !== 'low', true);
+check('excessive caps has the signal', analyzeEmail(capsEmail).signals.some(s => s.signal === 'Excessive capitalization'), true);
+check('multiple exclamation marks has the signal', analyzeEmail(capsEmail).signals.some(s => s.signal === 'Multiple exclamation marks'), true);
+
+const ipLinkEmail = 'Click here to verify: http://192.168.1.100/phish';
+check('email with IP link is flagged', analyzeEmail(ipLinkEmail).risk !== 'low', true);
+check('email detects IP link', analyzeEmail(ipLinkEmail).signals.some(s => s.signal === 'Contains link to IP address'), true);
+
+const suspTldEmail = 'Click here: http://secure-login.xyz/verify';
+check('email with suspicious TLD link is flagged', analyzeEmail(suspTldEmail).risk !== 'low', true);
 
 console.log(`\n=== ${pass} passed, ${fail} failed ===`);
 process.exit(fail > 0 ? 1 : 0);

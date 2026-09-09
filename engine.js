@@ -11,7 +11,17 @@ const POPULAR_BRANDS = [
   'discord', 'coinbase', 'binance', 'revolut', 'hsbc', 'barclays',
   'santander', 'rakuten', 'mercadolibre', 'americanexpress',
   'mastercard', 'docusign', 'salesforce', 'airbnb', 'venmo',
-  'westernunion'
+  'westernunion',
+  'zoom', 'slack', 'notion', 'twitch', 'epicgames', 'blizzard',
+  'ubisoft', 'rockstar', 'tesla', 'nike', 'adidas', 'walmart',
+  'target', 'bestbuy', 'costco', 'homedepot', 'lowes', 'wayfair',
+  'zillow', 'etsy', 'shopify', 'squarespace', 'wix', 'godaddy',
+  'namecheap', 'att', 'verizon', 'tmobile', 'vodafone',
+  'dhl', 'fedex', 'usps', 'royalmail',
+  'capitalone', 'pncbank', 'tdbank', 'scotiabank', 'natwest',
+  'kraken', 'gemini', 'ledger', 'metamask', 'blockfi',
+  'zelle', 'cashapp', 'wise', 'n26', 'monzo',
+  'riotgames', 'steampowered', 'playstation', 'xbox', 'nintendo'
 ];
 // This list is inherently incomplete — there is no bounded set of "all
 // brands," and every entry here is equally visible to anyone reading
@@ -25,13 +35,19 @@ const POPULAR_BRANDS = [
 // class fixed earlier (see README, the "t.co" substring bug).
 
 const SUSPICIOUS_TLDS = ['.xyz', '.top', '.club', '.work', '.support', '.click',
-  '.loan', '.men', '.win', '.bid', '.review', '.download', '.gq', '.tk', '.ml', '.cf', '.ga'];
+  '.loan', '.men', '.win', '.bid', '.review', '.download', '.gq', '.tk', '.ml', '.cf', '.ga',
+  '.info', '.buzz', '.icu', '.monster', '.surf', '.date', '.racing', '.cricket',
+  '.party', '.trade', '.webcam', '.stream', '.accountant', '.faith'];
 
 const URL_SHORTENERS = ['bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly',
-  'is.gd', 'buff.ly', 'adf.ly', 'shorte.st', 'rebrand.ly'];
+  'is.gd', 'buff.ly', 'adf.ly', 'shorte.st', 'rebrand.ly',
+  't.ly', 'cutt.ly', 'shorturl.at', 'rb.gy', 'bit.do',
+  'v.gd', 'qr.ae', 'cli.re', 'tiny.cc'];
 
 const SUSPICIOUS_KEYWORDS = ['secure', 'verify', 'account', 'update', 'confirm',
-  'login', 'signin', 'banking', 'suspend', 'urgent', 'validate', 'unlock'];
+  'login', 'signin', 'banking', 'suspend', 'urgent', 'validate', 'unlock',
+  'wallet', 'recover', 'restore', 'expire', 'blocked', 'invoice',
+  'payment', 'refund', 'delivery', 'package', 'tracking', 'secure-login'];
 
 function levenshtein(a, b) {
   const m = [];
@@ -107,6 +123,16 @@ function analyzeURL(rawUrlInput) {
   if (hostname.includes('xn--')) {
     add('Encoded (punycode) domain', 25, 'Can render as look-alike letters from another alphabet — used for homograph attacks.');
   }
+  if (url.port && !['80', '443', ''].includes(url.port)) {
+    add(`Non-standard port (${url.port})`, 10, 'Phishing sites often run on unusual ports to avoid blocklists.');
+  }
+  const pathSegments = url.pathname.split('/').filter(Boolean);
+  if (pathSegments.length >= 4) {
+    add(`Deep path (${pathSegments.length} segments)`, 8, 'Excessive path depth can be used to mimic a legitimate site structure.');
+  }
+  if (/%[0-9a-fA-F]{2}/.test(hostname)) {
+    add('Hex-encoded characters in hostname', 20, 'Encoding characters in the domain can hide the true destination.');
+  }
 
   const mainDomain = hostname.replace(/^www\./, '').split('.')[0];
   const normalizedHostname = normalizeLeet(hostname);
@@ -148,11 +174,16 @@ function analyzeURL(rawUrlInput) {
 
 const URGENCY_PHRASES = ['act now', 'immediate action', 'act immediately', 'account will be suspended',
   'account will be closed', 'verify within', '24 hours', 'limited time', 'act today', 'final notice',
-  'unusual activity', 'unauthorized access'];
+  'unusual activity', 'unauthorized access', 'will be deleted', 'security alert',
+  'unusual sign-in', 'password expires', 'action required', 'immediate response',
+  'within 48 hours', 'last warning', 'account compromise', 'confirm identity'];
 const SENSITIVE_REQUESTS = ['password', 'social security', 'ssn', 'credit card number', 'card number',
-  'cvv', 'pin number', 'one-time password', 'otp', 'verification code', 'bank account number', 'login credentials'];
+  'cvv', 'pin number', 'one-time password', 'otp', 'verification code', 'bank account number', 'login credentials',
+  'bank login', 'tax return', 'passport number', 'driver license', 'mother maiden name',
+  'security question', 'full card number', 'account password', 'online banking'];
 const GENERIC_GREETINGS = ['dear customer', 'dear user', 'dear member', 'dear valued customer',
-  'dear account holder', 'attention customer'];
+  'dear account holder', 'attention customer', 'dear friend', 'hello dear',
+  'good day', 'dear sir madam', 'hello user', 'dear valued user'];
 
 function analyzeEmail(textInput) {
   const text = textInput || '';
@@ -181,6 +212,30 @@ function analyzeEmail(textInput) {
   }
   if (/\.(exe|scr|bat|js|jar)\b/i.test(text)) {
     add('Mentions a risky attachment type', 20, 'Executable attachments are a common malware delivery method.');
+  }
+  const first200 = text.slice(0, 200);
+  const upperCount = (first200.match(/[A-Z]/g) || []).length;
+  const letterCount = (first200.match(/[A-Za-z]/g) || []).length;
+  if (letterCount > 20 && upperCount / letterCount > 0.3) {
+    add('Excessive capitalization', 10, 'SHOUTING text is a common pressure tactic in phishing emails.');
+  }
+  if ((text.match(/!/g) || []).length >= 3) {
+    add('Multiple exclamation marks', 8, 'Excessive exclamation marks create artificial urgency.');
+  }
+  const suspiciousUrlPatterns = text.match(/https?:\/\/[^\s<>"']+/g) || [];
+  for (const u of suspiciousUrlPatterns) {
+    try {
+      const parsed = new URL(u);
+      const host = parsed.hostname.toLowerCase();
+      if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host)) {
+        add('Contains link to IP address', 15, 'Links to raw IP addresses are a strong phishing indicator.');
+        break;
+      }
+      if (SUSPICIOUS_TLDS.some(t => host.endsWith(t))) {
+        add('Contains link to suspicious domain', 12, 'One or more links point to a domain with a high-risk ending.');
+        break;
+      }
+    } catch (_) { /* malformed URL in email — skip */ }
   }
 
   score = Math.min(score, 100);

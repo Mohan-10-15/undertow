@@ -62,6 +62,15 @@ async function run() {
     assert('no runtime errors', errors.length === 0);
   }
 
+  // ---- Newly-added brand (zoom) impersonation ----
+  {
+    const { dom, errors } = makeDom('http://zoom-secure-login.com/meeting');
+    await new Promise((r) => setTimeout(r, 30));
+    const doc = dom.window.document;
+    assert('new brand (zoom) impersonation flagged', parseInt(doc.querySelector('.score-number').textContent, 10) > 0);
+    assert('no runtime errors', errors.length === 0);
+  }
+
   // ---- Non-http tab (e.g. a chrome:// settings page) ----
   {
     const { dom, errors } = makeDom('chrome://extensions/');
