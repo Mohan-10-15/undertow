@@ -87,6 +87,14 @@ async function run() {
   assert('no uncaught runtime errors during full interaction flow (jsdom has no window.storage, exercising the fallback path)', errors.length === 0);
   if (errors.length) console.log('ERRORS:', errors);
 
+  // ---- New email signals: excessive caps and exclamation marks ----
+  $('#email-input').value = 'URGENT: YOUR ACCOUNT WILL BE DELETED!!! ACT NOW OR LOSE EVERYTHING!!!';
+  $('#scan-email-btn').dispatchEvent(new window.Event('click', { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 20));
+  const capsResult = $('#results').textContent;
+  assert('caps email flags excessive capitalization', capsResult.includes('Excessive capitalization') || capsResult.includes('capitalization'));
+  assert('caps email flags multiple exclamation marks', capsResult.includes('Multiple exclamation marks') || capsResult.includes('exclamation'));
+
   console.log('\nDone.');
 }
 
