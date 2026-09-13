@@ -486,6 +486,37 @@
     return str.split('').map(function (c) { return map[c] || c; }).join('');
   }
 
+  var COUNTRY_SLD_SUFFIXES = ['co.in', 'net.in', 'org.in', 'co.uk', 'org.uk', 'me.uk',
+    'com.au', 'net.au', 'org.au', 'co.nz', 'com.br', 'com.mx', 'com.cn', 'co.jp',
+    'com.sg', 'com.hk', 'com.tr', 'com.ar', 'co.za', 'com.co', 'com.ng', 'co.ke',
+    'com.my', 'com.ph', 'com.tw', 'co.kr', 'com.vn'];
+  var BRAND_OWNED_DOMAINS = {
+    google: ['googleapis.com', 'googleusercontent.com', 'googlesyndication.com',
+      'google-analytics.com', 'googleadservices.com', 'google.com'],
+    microsoft: ['microsoftonline.com', 'microsoftstore.com'],
+    amazon: ['amazonaws.com']
+  };
+  function isBrandOwnedDomain(brand, hostname) {
+    var owned = BRAND_OWNED_DOMAINS[brand];
+    if (!owned) return false;
+    return owned.some(function (d) { return hostname === d || hostname.endsWith('.' + d); });
+  }
+  function registrableLabel(hostname) {
+    var labels = hostname.split('.');
+    if (labels.length >= 3) {
+      var lastTwo = labels[labels.length - 2] + '.' + labels[labels.length - 1];
+      if (COUNTRY_SLD_SUFFIXES.indexOf(lastTwo) !== -1) return labels[labels.length - 3];
+    }
+    return labels[labels.length - 2];
+  }
+  function hostnameWords(hostname) {
+    var words = [];
+    hostname.split('.').forEach(function (segment) {
+      segment.split('-').forEach(function (word) { if (word) words.push(word); });
+    });
+    return words;
+  }
+
   function analyzeURL(rawUrlInput) {
     var rawUrl = (rawUrlInput || '').trim();
     if (!rawUrl) return { error: 'Enter a URL to analyze.' };
@@ -537,25 +568,27 @@
       add('Encoded (punycode) domain', 25, 'Can render as look-alike letters from another alphabet — used for homograph attacks.');
     }
 
-    var mainDomain = hostname.replace(/^www\./, '').split('.')[0];
+    var sld = registrableLabel(hostname);
     var normalizedHostname = normalizeLeet(hostname);
     var brandFlagged = false;
-    var isKnownBrandExactly = POPULAR_BRANDS.indexOf(mainDomain) !== -1;
+    var isKnownBrandExactly = POPULAR_BRANDS.indexOf(sld) !== -1;
     if (!isKnownBrandExactly) {
       for (var bi = 0; bi < POPULAR_BRANDS.length; bi++) {
         var brand = POPULAR_BRANDS[bi];
-        if (hostname.includes(brand) && mainDomain !== brand) {
+        if (hostname.includes(brand) && sld !== brand && !isBrandOwnedDomain(brand, hostname)) {
           add('Contains "' + brand + '" but isn\'t their domain', 30, 'A common way to impersonate a trusted brand.');
           brandFlagged = true;
           break;
         }
-        if (normalizedHostname.includes(brand) && !hostname.includes(brand)) {
+        var dehyphenated = normalizedHostname.replace(/-/g, '');
+        if (dehyphenated.includes(brand) && !hostname.includes(brand)) {
           add('Impersonates "' + brand + '" using look-alike characters', 35, 'Swapping numbers for letters (like 0/1/3/5) makes this mimic "' + brand + '".');
           brandFlagged = true;
           break;
         }
-        var distance = levenshtein(normalizeLeet(mainDomain), brand);
-        if (distance > 0 && distance <= 2 && Math.abs(mainDomain.length - brand.length) <= 2) {
+        var distance = levenshtein(normalizeLeet(sld), brand);
+        var maxDistance = brand.length <= 5 ? 1 : 2;
+        if (distance > 0 && distance <= maxDistance && Math.abs(sld.length - brand.length) <= 2 && sld.charAt(0) === brand.charAt(0)) {
           add('Impersonates "' + brand + '"', 35, 'Domain is a near-misspelling of "' + brand + '".');
           brandFlagged = true;
           break;
@@ -563,7 +596,7 @@
       }
     }
     if (!brandFlagged) {
-      var hits = SUSPICIOUS_KEYWORDS.filter(function (k) { return hostname.includes(k); });
+      var hits = hostnameWords(hostname).filter(function (k) { return SUSPICIOUS_KEYWORDS.indexOf(k) !== -1; });
       if (hits.length >= 2) {
         add('Multiple suspicious keywords (' + hits.join(', ') + ')', 15, 'Common wording on credential-harvesting pages.');
       }

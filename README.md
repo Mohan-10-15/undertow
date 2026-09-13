@@ -40,12 +40,14 @@ Weighted heuristic rules — no ML model, works offline. Links: structure (IP-as
 
 | Metric | Held-out test split |
 |---|---|
-| False positive rate | 4.5% |
-| Precision | 68.4% |
-| Recall | 23.2% |
-| F1 | 0.346 |
+| False positive rate | 4.1% |
+| Precision | 64.5% |
+| Recall | 17.8% |
+| F1 | 0.279 |
 
 These are within noise of the original (contaminated) numbers — reassuring for the outcome, but the process was still wrong to begin with, and `validate.js` prints both side by side so the size of the effect is visible, not asserted.
+
+**A false-positive class fixed afterward, with its trade-off shown rather than hidden:** the first release flagged *official* websites as medium/high risk because the brand-impersonation rule ran substring matching across the **whole hostname** against a registrable domain computed as the *first* label. `mail.google.com` produced "Contains google but isn't their domain", `support.apple.com` produced "Contains apple…", and short-brand near-misspellings matched coincidence, not typo (`abc.go.com` as "sbi", `doodle.com` as "google", `bmi.ir` as "sbi", `web.archive.org` as "wix"). The fix (in `engine.js`, committed with regression tests): brand checks run against the **registrable label** (so the brand's own subdomains are recognized as its own), "Contains" only fires when the hostname isn't the brand's real domain nor one of its known-owned domains (`microsoftonline.com`, `googleapis.com`, `amazonaws.com`), near-misspellings must preserve the first letter and stay within an edit budget that shrinks with brand length, and keyword matching is word-based (`securelogin.arubanetworks.com` no longer trips as "secure"+"login"). Re-measured on the same held-out split this moved FPR from 4.5%→4.1% (and can't be represented in this data for the *specific* official sites it fixed — the 2016 legitimate corpus contains none of them). Recall fell from 23.2%→17.8%, and it's honest to say why: the removed flags were largely real phishing *for the wrong reason* — phish hosted on Google's own infrastructure (`docs.google.com`, `googleapis.com` forms) and generic `mail.`/`app.`/`s.`-subdomain sites near-matched to `gmail`/`apple`/`sbi`. Those are now (correctly) not "brand impersonation"; catching phishing that rides legitimate third-party hosting is exactly the gap the optional Safe Browsing layer exists to close.
 
 **Brand list expansion, validated rather than assumed safe:** added ~20 more global brands (Samsung, Alibaba, HSBC, Revolut, etc.) beyond the original US/India-skewed ~30. Tried "telegram" too — validation caught it colliding with `telegraf.com.ua`, a real Ukrainian news site (*"telegraf"* is just the word "telegraph," one edit away from "telegram," not phishing). Dropped it. This is in the code comments in `engine.js`, not just here, because it's the concrete case for why every future addition needs the same check, not a one-time cleanup.
 
@@ -78,27 +80,27 @@ Add your own free [Google Safe Browsing API key](https://developers.google.com/s
 
 ## What this would actually take to be industry-level
 
-- **Recall is 23.2% against real phishing, on a proper held-out split.** That's the detection-quality gap, not a documentation gap.
+- **Recall is 17.8% against real phishing, on a proper held-out split.** That's the detection-quality gap, not a documentation gap. (It was 23.2% before the official-site false-positive fix above; the difference is mostly reclassifying phish hosted on the brand's own infrastructure, which no domain-only heuristic can flag without also flagging every official subdomain.)
 - **Adversarial resistance is close to zero** — 6/7 constructed evasions succeeded. See above.
 - **The email scanner has no real-data validation at all**, unlike the link scanner.
 - **Still one threat-intel source, called the architecturally-wrong way for production** — direct browser call, not a fused multi-source backend.
 - **No learning loop of its own** — only the optional Safe Browsing layer improves without a code change, and that's Google's data.
 - **The extension exists and is unit-tested but never loaded in a real browser by me** — no browser in this sandbox.
 - **`npm audit` doesn't run in the environment that built this** (times out, confirmed twice) — dependency vulnerability status is genuinely unknown.
-- **No independent security review.** 98 automated self-authored checks catch real bugs — several documented above, found by testing against reality instead of assumptions — but "I tested my own work thoroughly" is a different claim than "someone else checked it," and this project has found new, real issues on every single pass so far, which is itself evidence there are more still there.
+- **No independent security review.** 112 automated self-authored checks catch real bugs — several documented above, found by testing against reality instead of assumptions — but "I tested my own work thoroughly" is a different claim than "someone else checked it," and this project has found new, real issues on every single pass so far, which is itself evidence there are more still there.
 - **No ops, no legal/compliance layer.**
 
 ## Testing
 
 ```
-npm install && npm test                    # main app: 79 checks
+npm install && npm test                    # main app: 93 checks
 cd extension && npm install && npm test    # extension: 19 checks
 cd validation && bash download-data.sh && node validate.js         # real held-out validation
 cd validation && node adversarial-check.js                          # evasion check
 cd validation && node diagnose-fp.js                                 # false-positive root-cause tool
 ```
 
-**98 automated pass/fail checks** across `test.js` (19), `functional-test.js` (20), `storage-test.js` (5), `external-check-test.js` (23), `localstorage-fallback-test.js` (12), `extension/popup-test.js` (19). The validation/adversarial scripts are reporting tools, not pass/fail gates — there's no "correct" number of evasions to target, and turning the adversarial script into a test that must pass would just mean tuning to beat my own known test list, the same overfitting mistake documented above.
+**112 automated pass/fail checks** across `test.js` (33, including the official-site and near-misspelling regression section), `functional-test.js` (20), `storage-test.js` (5), `external-check-test.js` (23), `localstorage-fallback-test.js` (12), `extension/popup-test.js` (19). The validation/adversarial scripts are reporting tools, not pass/fail gates — there's no "correct" number of evasions to target, and turning the adversarial script into a test that must pass would just mean tuning to beat my own known test list, the same overfitting mistake documented above.
 
 ## Project structure
 

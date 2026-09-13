@@ -52,6 +52,65 @@ function normalizeLeet(str) {
   return str.split('').map(c => map[c] || c).join('');
 }
 
+// Common "second-level" country suffixes so paytm.co.in / mybank.co.uk
+// resolve their real name (paytm, mybank) instead of the country fragment
+// (co). Bounded, static list on purpose: the engine must stay free of any
+// runtime dependency so index.html works with zero setup and no build.
+const COUNTRY_SLD_SUFFIXES = ['co.in', 'net.in', 'org.in', 'co.uk', 'org.uk', 'me.uk',
+  'com.au', 'net.au', 'org.au', 'co.nz', 'com.br', 'com.mx', 'com.cn', 'co.jp',
+  'com.sg', 'com.hk', 'com.tr', 'com.ar', 'co.za', 'com.co', 'com.ng', 'co.ke',
+  'com.my', 'com.ph', 'com.tw', 'co.kr', 'com.vn'];
+
+// Registrable domains genuinely owned by a brand that happen to *contain*
+// the brand's name as a prefix — microsoftonline.com, googleapis.com,
+// amazonaws.com, and Google's Blogger. A brand string appearing under one
+// of these is the brand's own infrastructure, not impersonation, so it must
+// not fire the "Contains" signal. Bounded on purpose to the real sequences
+// that collide; the "telegram / telegraf.com.ua" comment above documents
+// the decision style this follows — checked against validation/data rather
+// than assumed safe.
+const BRAND_OWNED_DOMAINS = {
+  google: ['googleapis.com', 'googleusercontent.com', 'googlesyndication.com',
+    'google-analytics.com', 'googleadservices.com', 'google.com'],
+  microsoft: ['microsoftonline.com', 'microsoftstore.com'],
+  amazon: ['amazonaws.com'],
+};
+function isBrandOwnedDomain(brand, hostname) {
+  const owned = BRAND_OWNED_DOMAINS[brand];
+  if (!owned) return false;
+  return owned.some((d) => hostname === d || hostname.endsWith('.' + d));
+}
+
+// The registrable name label — "google" for mail.google.com, "att" for
+// secure.att.com, "paytm" for paytm.co.in. Brand impersonation lives in
+// this label (paypal-login.com, secure-paypal.com); a brand in a
+// *subdomain* of its own domain (mail.google.com, account.microsoft.com)
+// is legitimate. The earlier `hostname.split('.')[0]` returned the first
+// label, which made official sites like mail.google.com look like
+// "unrelated" domains containing their own brand — the false-positive
+// class this function fixes (measured against validation/data, not assumed).
+function registrableLabel(hostname) {
+  const labels = hostname.split('.');
+  if (labels.length >= 3) {
+    const lastTwo = labels[labels.length - 2] + '.' + labels[labels.length - 1];
+    if (COUNTRY_SLD_SUFFIXES.indexOf(lastTwo) !== -1) return labels[labels.length - 3];
+  }
+  return labels[labels.length - 2];
+}
+
+// Every "word" in the hostname, split on dots and hyphens: paypal-login.com
+// → ['paypal', 'login'], mail.secure-paypal.net → ['mail', 'secure', 'paypal'].
+// Used for the keyword check so "secure-login.example.com" still trips the
+// keyword rule while a run-together label like "securelogin.arubanetworks.com"
+// doesn't.
+function hostnameWords(hostname) {
+  const words = [];
+  hostname.split('.').forEach((segment) => {
+    segment.split('-').forEach((word) => { if (word) words.push(word); });
+  });
+  return words;
+}
+
 function analyzeURL(rawUrlInput) {
   const rawUrl = (rawUrlInput || '').trim();
   if (!rawUrl) return { error: 'Enter a URL to analyze.' };
@@ -108,26 +167,47 @@ function analyzeURL(rawUrlInput) {
     add('Encoded (punycode) domain', 25, 'Can render as look-alike letters from another alphabet — used for homograph attacks.');
   }
 
-  const mainDomain = hostname.replace(/^www\./, '').split('.')[0];
+  const sld = registrableLabel(hostname);
   const normalizedHostname = normalizeLeet(hostname);
   let brandFlagged = false;
-  const isKnownBrandExactly = POPULAR_BRANDS.indexOf(mainDomain) !== -1;
+  const isKnownBrandExactly = POPULAR_BRANDS.indexOf(sld) !== -1;
   if (!isKnownBrandExactly) {
     for (const brand of POPULAR_BRANDS) {
-      if (hostname.includes(brand) && mainDomain !== brand) {
+      // Brand name anywhere in the hostname but not as the real domain:
+      // googleapis.com hosting a form, chaseoip.gotdns.ch, paypal-login.com.
+      // Guarded so the brand's OWN domains never fire it — sld === brand
+      // (mail.google.com, accounts.google.com) already skipped the loop via
+      // isKnownBrandExactly, and BRAND_OWNED_DOMAINS covers exact brand
+      // domains whose name merely contains the brand string as a prefix
+      // (microsoftonline.com, googleapis.com, amazonaws.com).
+      if (hostname.includes(brand) && sld !== brand && !isBrandOwnedDomain(brand, hostname)) {
         add(`Contains "${brand}" but isn't their domain`, 30, 'A common way to impersonate a trusted brand.');
         brandFlagged = true;
         break;
       }
-      // Leetspeak substitution anywhere in the hostname, e.g. "paypa1-secure.com"
-      if (normalizedHostname.includes(brand) && !hostname.includes(brand)) {
+      // Leetspeak substitution anywhere in the hostname, e.g. "paypa1-secure.com".
+      // Hyphens are also stripped so a brand split across a hyphen — "ama-zon"
+      // hosting pages, "goo-gle-verify.xyz" — is still recognized as the brand.
+      const dehyphenated = normalizedHostname.replace(/-/g, '');
+      if (dehyphenated.includes(brand) && !hostname.includes(brand)) {
         add(`Impersonates "${brand}" using look-alike characters`, 35, `Swapping numbers for letters (like 0/1/3/5) makes this mimic "${brand}".`);
         brandFlagged = true;
         break;
       }
-      // Near-misspelling of the whole domain, e.g. "gooogle.com"
-      const distance = levenshtein(normalizeLeet(mainDomain), brand);
-      if (distance > 0 && distance <= 2 && Math.abs(mainDomain.length - brand.length) <= 2) {
+      // Near-misspelling of the registrable name, e.g. "gooogle.com". Runs on
+      // the *registrable* label only — the old first-label version matched any
+      // "mail.xyz" subdomain as a one-edit "gmail" (validation/data shows the
+      // majority of its "gmail/sbi/apple" hits were exactly that kind of
+      // coincidence on unrelated hosting subdomains, not typosquats). First
+      // letter must match: typosquats preserve it, coincidental short strings
+      // ("abc" vs "sbi", "doodle" vs "google", "bmi" vs "sbi") don't. And the
+      // edit budget shrinks with brand length: two edits on a 3–5-letter name
+      // is a coincidence, not a typo ("net" vs "n26", "web" vs "wix",
+      // "ssa.gov" vs "sbi", "nrk.no" vs "nike" — all measured false positives
+      // in validation/data for short brands added to the list).
+      const distance = levenshtein(normalizeLeet(sld), brand);
+      const maxDistance = brand.length <= 5 ? 1 : 2;
+      if (distance > 0 && distance <= maxDistance && Math.abs(sld.length - brand.length) <= 2 && sld.charAt(0) === brand.charAt(0)) {
         add(`Impersonates "${brand}"`, 35, `Domain is a near-misspelling of "${brand}".`);
         brandFlagged = true;
         break;
@@ -135,7 +215,7 @@ function analyzeURL(rawUrlInput) {
     }
   }
   if (!brandFlagged) {
-    const hits = SUSPICIOUS_KEYWORDS.filter(k => hostname.includes(k));
+    const hits = hostnameWords(hostname).filter(k => SUSPICIOUS_KEYWORDS.indexOf(k) !== -1);
     if (hits.length >= 2) {
       add(`Multiple suspicious keywords (${hits.join(', ')})`, 15, 'Common wording on credential-harvesting pages.');
     }
